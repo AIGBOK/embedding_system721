@@ -4,8 +4,8 @@ import math
 
 data_list = []
 
-file_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0430\\0430final.csv"
-output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0430\\0430_rssi_output.csv"
+file_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\0506final.csv"
+output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\0506_rssi_testoutput.csv"
 
 # 第一部分：讀取資料
 with open(file_path, "r", encoding="utf-8") as f:
@@ -28,15 +28,19 @@ with open(file_path, "r", encoding="utf-8") as f:
         data_list.append(row_dict)
 
 # 第二部分：定義時間範圍
+# time_ranges = [
+#     ("11:10:40", "11:11:40"),
+#     ("11:11:40", "11:12:40"),
+#     ("11:12:40", "11:13:40"),
+#     ("11:13:40", "11:14:00"),
+#     ("11:14:00", "11:15:00"),
+#     ("11:15:20", "11:16:20"),
+#     ("11:16:30", "11:17:30")
+# ]
 time_ranges = [
-    ("11:10:40", "11:11:40"),
-    ("11:11:40", "11:12:40"),
-    ("11:12:40", "11:13:40"),
-    ("11:13:40", "11:14:00"),
-    ("11:14:00", "11:15:00"),
-    ("11:15:20", "11:16:20"),
-    ("11:16:30", "11:17:30")
+    ("11:29:53", "11:30:42")
 ]
+
 
 time_ranges_dt = [
     (datetime.strptime(start, "%H:%M:%S"), datetime.strptime(end, "%H:%M:%S"))
