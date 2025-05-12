@@ -9,4 +9,3 @@
 # 第三個要執行的程式-pathLossModel.py:  
   這個程式會把平均的rssi算出來，並且會把平均的path loss 係數算出來，顯示在螢幕上。此程式不會輸出csv檔。  
   此程式要改的地方有:target_points、csv_file  
-123
