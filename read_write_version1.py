@@ -4,28 +4,49 @@ import math
 
 data_list = []
 
-file_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\0506final.csv"
-output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\0506_rssi_testoutput.csv"
+file_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\0514final.csv"
+output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\0514_rssi_testoutput.csv"
 
 # 第一部分：讀取資料
+# with open(file_path, "r", encoding="utf-8") as f:
+#     reader = csv.reader(f)
+#     next(reader)
+
+#     for row in reader:
+#         if not row:
+#             continue
+
+#         row_dict = {}
+#         for i in range(2, len(row) - 1, 2):
+#             try:
+#                 rssi_db = int(row[i])
+#                 power_mW = 10 ** (rssi_db / 10)
+#                 time = row[i + 1]
+#                 row_dict[time] = power_mW
+#             except (ValueError, IndexError):
+#                 continue
+#         data_list.append(row_dict)
 with open(file_path, "r", encoding="utf-8") as f:
     reader = csv.reader(f)
-    next(reader)
+    next(reader)  # 跳過 header
 
     for row in reader:
         if not row:
             continue
-
         row_dict = {}
-        for i in range(2, len(row) - 1, 2):
+        for i in range(2, len(row) - 1, 3):
             try:
                 rssi_db = int(row[i])
-                power_mW = 10 ** (rssi_db / 10)
-                time = row[i + 1]
-                row_dict[time] = power_mW
+                if( rssi_db >= -10):
+                    continue
+                else:
+                    power_mW = 10 ** (rssi_db / 10)
+                    time = row[i + 1]
+                    row_dict[time] = power_mW
             except (ValueError, IndexError):
                 continue
         data_list.append(row_dict)
+
 
 # 第二部分：定義時間範圍
 # time_ranges = [
@@ -38,9 +59,26 @@ with open(file_path, "r", encoding="utf-8") as f:
 #     ("11:16:30", "11:17:30")
 # ]
 time_ranges = [
-    ("11:29:53", "11:30:42")
-]
+    ("11:30:00", "11:30:10"),  ##point 1 d=1 
+    ("11:31:03", "11:31:13"),  #d=2
+    ("11:32:00", "11:32:10"),  #d=3 
+    ("11:32:57", "11:33:07"),  #d=4   
+    ("11:21:16", "11:21:26"),  
+    ("11:21:41", "11:21:51"),  #d=2
+    ("11:22:40", "11:22:50"),  #d=3
+    ("11:23:40", "11:23:50"),  #d=4
+    ("11:25:04", "11:25:14"),  ##point 3 d=1 
+    ("11:26:04", "11:26:14"),  #d=2
+    ("11:27:04", "11:27:14"),  #d=3
+    ("11:28:45", "11:28:55"),  #d=4
+    ("11:13:20", "11:13:30"),  ##point 4 d=1
+    ("11:14:21", "11:14:31"),  #d=2
+    ("11:16:49", "11:16:59"),  #d=3
+    ("11:18:20", "11:18:30"),  #d=4
+    ("11:37:23", "11:37:33"),
+    ("11:35:20", "11:35:30")
 
+]
 
 time_ranges_dt = [
     (datetime.strptime(start, "%H:%M:%S"), datetime.strptime(end, "%H:%M:%S"))
