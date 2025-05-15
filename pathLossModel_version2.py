@@ -2,15 +2,16 @@ import csv
 import math
 
 # 輸入你想要抓的點（依序對應每組資料）
-target_points = ['4', '2_2', '2_1', '1', '3_1', '3_2']
-csv_file = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\0506_rssi_output.csv"
-output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\pathLoss_output.csv"
-
+csv_file = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\0514_rssi_testoutput.csv"
+output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\pathLoss0514_output.csv"
+target_points = ['1', '2', '3', '4']
 #0430的測資
 # target_points = ['4']
 # csv_file = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0430\\0430_rssi_output.csv"
 # distanceGroup = [1,2,4,8]
 
+#0506的測資
+# target_points = ['4', '2_2', '2_1', '1', '3_1', '3_2']
 taget_length = len(target_points)  # 輸出: 6
 point_numbers = [int(p.split('_')[0]) for p in target_points]
 
