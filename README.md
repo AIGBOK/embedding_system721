@@ -14,3 +14,8 @@
 ## 第二個要執行的程式: countPoistion.py
   這個程式要改的地方有:p_db0、p_dbtest、path_loss_coff、以及下面的x1,y1~x3、y3
   這個程式會直接跑出預測的使用者座標。
+
+## 第二個也可以改執行: countPoistion_version2.py
+  這個程式要改的地方有:p_dbtest、beacon_seq
+  這個程式會直接跑出預測的使用者座標。
+  這個程式會自動讀csv檔案，如果三角定位的值都做好，這個程式會比較好用。
