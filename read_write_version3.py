@@ -7,7 +7,7 @@ from scipy.stats import linregress
 data_list = []
 
 file_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\0514final.csv"
-output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\0514_rssi_testoutput.csv"
+output_path = "C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0514\\pathLoss0514_output.csv"
 
 # 第一部分：讀取資料
 with open(file_path, "r", encoding="utf-8") as f:
