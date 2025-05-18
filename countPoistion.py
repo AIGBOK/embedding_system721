@@ -1,9 +1,26 @@
 import math
 import numpy as np
 
-p_db0 = [-53.18, -48.28, -50.18]
-p_dbtest = [-56.11, -53.65, -57.39] #手動輸入的
-path_loss_coff = [0.929, 1.363, 1.663]
+# test c
+# p_db0 = [-57.4, -50.87, -53.87]
+# p_dbtest = [-61.94, -70.85, -55.91] #手動輸入的
+# path_loss_coff = [0.8817, 2.463, 1.85]
+
+
+# # test c 4m
+p_db0 = [-55.4, -50.87, -53.87]
+p_dbtest = [-52.98, -60.08, -58.17] #手動輸入的
+path_loss_coff = [0.8817, 2.463, 1.85]
+
+# test 2 3m
+# p_db0 = [-55.4, -50.87, -53.87]
+# p_dbtest = [-62.11, -61.81, -59.67] #手動輸入的
+# path_loss_coff = [0.8817, 2.463, 1.85]
+
+#這是test a的
+# p_db0 = [-56.21, -40.87, -43.87]
+# p_dbtest = [-61.57, -51.23, -57.67] #手動輸入的
+# path_loss_coff = [1.0166, 2.463, 1.85]
 distance = []
 #先計算跟每一個beacon 的距離
 for db0, db3, path_loss in zip(p_db0, p_dbtest, path_loss_coff):
@@ -31,10 +48,15 @@ def trilaterate(A, B, C, r1, r2, r3):
     return final_pos
 
 # 假設三點如下（請自行替換成實際值）
-x1, y1 = 3.2, 9.6
+#test c
+x1, y1 = 2.4, 0
 x2, y2 = 0, 6.4
-x3, y3 = 5.6, 4.8  # 約等於 equilateral triangle
+x3, y3 = 5.6, 4.3  # 約等於 equilateral triangle
 
+#這是test a
+# x1, y1 = 3.5, 10.4
+# x2, y2 = 0, 6.4
+# x3, y3 = 5.6, 4.3  # 約等於 equilateral triangle
 # 已知三個點的位置
 A = np.array([x1, y1])
 B = np.array([x2, y2])
