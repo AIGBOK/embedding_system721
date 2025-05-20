@@ -1,25 +1,37 @@
 import csv
+from collections import defaultdict
 
-#0430的測資
-input_file = 'C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0430\\beacon_20250430_111838.csv'    # 換成你的實際檔案名稱
-output_file = 'C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0430\\0430final.csv'
+# 輸入檔案
+input_file = 'C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0520\\beacon_20250520_115051.csv'
 
-#0506的測資
-# input_file = 'C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\beacon_20250506_115613.csv'    # 換成你的實際檔案名稱
-# output_file = 'C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0506\\0506final.csv'
+# 輸出檔案前綴（會加上 major 的值）
+output_prefix = 'C:\\Users\\chouy\\Desktop\\embedding_system\\Documents0520\\0520_major'
 
-# 讀取 csv 檔案
+# 讀取 CSV 檔案
 with open(input_file, newline='', encoding='utf-8') as f:
     reader = list(csv.reader(f))
-    header = reader[0]                     # 第一列是標題
-    data_rows = reader[1:]                 # 其餘為資料列
+    header = reader[0]
+    data_rows = reader[1:]
 
-    # 把每一列的 Minor 欄位轉成整數來排序
-    minor_index = header.index('Minor')   # 找出 Minor 欄位的位置
-    data_rows.sort(key=lambda row: int(row[minor_index]))
+    # 找出 Major 和 Minor 的 index
+    major_index = header.index('Major')
+    minor_index = header.index('Minor')
 
-# 寫入排序後的檔案
-with open(output_file, 'w', newline='', encoding='utf-8') as f:
-    writer = csv.writer(f)
-    writer.writerow(header)       # 寫入標題
-    writer.writerows(data_rows)   # 寫入排序後資料列
+    # 用 dictionary 分組資料
+    grouped_data = defaultdict(list)
+    for row in data_rows:
+        major_value = int(row[major_index])
+        grouped_data[major_value].append(row)
+
+# 寫出每個 Major 的檔案
+for major, rows in grouped_data.items():
+    # 每組內部按照 Minor 排序
+    sorted_rows = sorted(rows, key=lambda r: int(r[minor_index]))
+    
+    # 檔名格式，例如：0514_major1.csv
+    output_file = f'{output_prefix}{major}.csv'
+
+    with open(output_file, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        writer.writerows(sorted_rows)
