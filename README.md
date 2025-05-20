@@ -2,7 +2,7 @@
 程式分為訓練模式、跟計算位置模式，請依照以下順序執行程式:  
 # 訓練模式
 ## 第一個要執行的程式-changeMinorSequence.py  
-  這個程式是把csv檔案裡面的minor，依照大小順序從低到高排列。如此輸出的row就會剛好對應第幾個beacon，如row1對應beacon1。  
+  這個程式是把csv檔案裡面的major、minor，依照大小順序從低到高排列。如此輸出的row就會剛好對應第幾個beacon，如row1對應beacon1。這個程式會輸出兩個檔案，對應到major1跟major 2  
   此程式要改的地方有:input_file、output_file兩個變數  
 ## 第二個要執行的程式-read_write_version3:  
   這個程式是會根據時間把需要的資料抓出來，會直接計算P0、path loss係數，最後會存到一個excel檔裡面。  
