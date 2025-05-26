@@ -19,3 +19,15 @@
   這個程式要改的地方有:p_dbtest、beacon_seq
   這個程式會直接跑出預測的使用者座標。
   這個程式會自動讀csv檔案，如果三角定位的值都做好，這個程式會比較好用。
+
+
+##執行countPoistion_version3.py
+  這個程式要改的地方有:input_file_rssi、input_file_pathloss
+  它會自動抓取0520_rssi_testoutput並自動選出三個最大的rssi記錄其beacon編號
+  接著判斷要用path1還是path2:
+  如果最大的三組beacon是
+  2,3,4就取beacon2.3的path2，且2大於3，4就用path1，否則用path2
+  1,3,4就取beacon1.4的path2，且1大於4，3就用path1，否則用path2
+  1,2,4就取beacon1.4的path1，且1大於4，2就用path1，否則用path2
+  1,2,3就取beacon2.3的path1，且2大於3，1就用path1，否則用path2
+
