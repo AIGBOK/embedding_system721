@@ -30,4 +30,6 @@
   1,3,4就取beacon1.4的path2，且1大於4，3就用path1，否則用path2
   1,2,4就取beacon1.4的path1，且1大於4，2就用path1，否則用path2
   1,2,3就取beacon2.3的path1，且2大於3，1就用path1，否則用path2
+  最後會用三角定位算出使用者位置
+  
 
