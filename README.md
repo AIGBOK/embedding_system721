@@ -21,7 +21,7 @@
   這個程式會自動讀csv檔案，如果三角定位的值都做好，這個程式會比較好用。
 
 
-#執行countPoistion_version3.py
+## 執行countPoistion_version3.py
   這個程式要改的地方有:input_file_rssi、input_file_pathloss
   它會自動抓取0520_rssi_testoutput並自動選出三個最大的rssi記錄其beacon編號
   接著判斷要用path1還是path2:
