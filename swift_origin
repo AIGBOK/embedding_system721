@@ -1,0 +1,148 @@
+//
+//  ViewController.swift
+//  iBeacon
+//
+//  Created by admin on 2025/4/15.
+//
+
+import UIKit
+import CoreLocation
+import CoreMotion
+
+var beaconRSSLog: [String: [(Int, Date, Double)]] = [:]  // (RSSI, 時間, Yaw)
+
+class ViewController: UIViewController,CLLocationManagerDelegate {
+
+    var locationManager: CLLocationManager = CLLocationManager()
+    let motionManager = CMMotionManager()
+    var currentYaw: Double = 0.0
+
+    @IBOutlet weak var rangingResultTextView: UITextView!
+    @IBOutlet weak var monitorResultTextView: UITextView!
+    @IBOutlet weak var exportButtonTapped: UIButton!
+    let uuid = "77C99B62-88FC-4C78-B39C-D6FE06E76372"
+    let identifier = "esd region"
+
+    func locationManager(_ manager: CLLocationManager, didRangeBeacons beacons: [CLBeacon], in region: CLBeaconRegion) {
+        rangingResultTextView.text = ""
+
+        for beacon in beacons {
+            let key = "\(beacon.major)-\(beacon.minor)"
+            if beaconRSSLog[key] == nil {
+                beaconRSSLog[key] = []
+            }
+
+            let now = Date()
+            beaconRSSLog[key]?.append((beacon.rssi, now, currentYaw))
+
+            let yawString = String(format: "%.2f", currentYaw)
+            rangingResultTextView.text +=
+                "Major: \(beacon.major)  Minor: \(beacon.minor)\n" +
+                "RSSI: \(beacon.rssi)  Yaw: \(yawString)°\n\n"
+        }
+
+        _ = saveBeaconDataToCSV()
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        locationManager.delegate = self
+
+        if #available(iOS 14, *) {
+            let currentStatus = locationManager.authorizationStatus
+            if currentStatus != .authorizedAlways {
+                locationManager.requestAlwaysAuthorization()
+            }
+        } else {
+            let currentStatus = CLLocationManager.authorizationStatus()
+            if currentStatus != .authorizedAlways {
+                locationManager.requestAlwaysAuthorization()
+            }
+        }
+
+        let constraint = CLBeaconIdentityConstraint(uuid: UUID(uuidString: uuid)!)
+        locationManager.startRangingBeacons(satisfying: constraint)
+
+        monitorResultTextView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        monitorResultTextView.isEditable = false
+        monitorResultTextView.isSelectable = true
+
+        if motionManager.isDeviceMotionAvailable {
+            motionManager.deviceMotionUpdateInterval = 0.2
+            motionManager.startDeviceMotionUpdates()
+
+            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+                if let motion = self?.motionManager.deviceMotion {
+                    let yawDegrees = motion.attitude.yaw * 180 / .pi
+                    self?.currentYaw = yawDegrees
+                }
+            }
+        }
+    }
+
+    func saveBeaconDataToCSV() -> URL {
+        let filenameFormatter = DateFormatter()
+        filenameFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = filenameFormatter.string(from: Date())
+        let filename = "beacon_\(timestamp).csv"
+
+        let fileManager = FileManager.default
+        let urls = fileManager.urls(for: .documentDirectory, in: .userDomainMask)
+        let documentDirectory = urls[0]
+        let fileURL = documentDirectory.appendingPathComponent(filename)
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm:ss"
+        timeFormatter.locale = Locale(identifier: "zh_TW")
+        timeFormatter.timeZone = TimeZone(identifier: "Asia/Taipei")
+
+        var csvText = "Major,Minor"
+        for i in 1...100 {
+            csvText += ",RSSI\(i),Time\(i),Yaw\(i)"
+        }
+        csvText += "\n"
+
+        for (key, rssiTimeList) in beaconRSSLog {
+            let majorMinor = key.split(separator: "-")
+            var newLine = "\(majorMinor[0]),\(majorMinor[1])"
+            for (rssi, time, yaw) in rssiTimeList {
+                let timeString = timeFormatter.string(from: time)
+                let yawValue = String(format: "%.2f", yaw)
+                newLine += ",\(rssi),\(timeString),\(yawValue)"
+            }
+            csvText += newLine + "\n"
+        }
+
+        do {
+            try csvText.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("✅ 成功存檔到: \(fileURL.lastPathComponent)")
+        } catch {
+            print("❌ 存檔錯誤: \(error)")
+        }
+        return fileURL
+    }
+
+    @IBAction func exportButtonTapped(_ sender: UIButton) {
+        showRecent10SecondAverages()
+    }
+
+    func showRecent10SecondAverages() {
+        let now = Date()
+        let threshold = now.addingTimeInterval(-10)
+        var previewText = "Beacon 最近10秒平均RSSI\n\n"
+
+        for (key, rssiList) in beaconRSSLog {
+            let majorMinor = key.split(separator: "-")
+            let recentValues = rssiList.filter { $0.1 >= threshold }.map { $0.0 }
+
+            if !recentValues.isEmpty {
+                let avgRSSI = Double(recentValues.reduce(0, +)) / Double(recentValues.count)
+                previewText += "Beacon \(majorMinor[0])-\(majorMinor[1]): 平均 RSSI = \(String(format: "%.2f", avgRSSI))\n"
+            } else {
+                previewText += "Beacon \(majorMinor[0])-\(majorMinor[1]): 無資料\n"
+            }
+        }
+
+        monitorResultTextView.text = previewText
+    }
+}
