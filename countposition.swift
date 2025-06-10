@@ -511,11 +511,11 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     // MARK: - Region Detection (新增的功能)
     func determineRegionFromY(_ yCoordinate: Double) -> String {
         if yCoordinate < 3.2 {
-            return "A"
+            return "C"
         } else if yCoordinate >= 3.2 && yCoordinate <= 7.2 {
             return "B"
         } else {
-            return "C"
+            return "A"
         }
     }
     
