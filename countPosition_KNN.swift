@@ -204,17 +204,20 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         exportButton.isEnabled = false
     }
 
-    // MARK: - Beacon Callback
+    // MARK: - Beacon Callback（不動，clamp 邏輯留在這）
     func locationManager(_ manager: CLLocationManager,
                          didRangeBeacons beacons: [CLBeacon],
                          in region: CLBeaconRegion) {
         guard isRecording else { return }
+
+        var newText = ""
         for beacon in beacons {
             let key = "\(beacon.major)-\(beacon.minor)"
             if beaconRSSLog[key] == nil {
                 beaconRSSLog[key] = []
             }
-            // clamp：大於 -10 dBm 就當作 -90
+
+            // clamp：若 RSSI > -10，就當成 -90
             let rawRSSI = beacon.rssi
             let sanitizedRSSI = rawRSSI > -10 ? -90 : rawRSSI
 
@@ -225,11 +228,14 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
             )
             beaconRSSLog[key]!.append(data)
 
-            // UI 顯示也換成 sanitizedRSSI
             let yawStr = String(format: "%.2f", currentYaw)
-            rangingResultTextView.text +=
+            newText +=
                 "Major: \(beacon.major)  Minor: \(beacon.minor)\n" +
                 "RSSI: \(sanitizedRSSI)  Yaw: \(yawStr)°\n\n"
+        }
+
+        DispatchQueue.main.async {
+            self.rangingResultTextView.text = newText
         }
     }
 
@@ -257,57 +263,40 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     func calculatePosition() {
         // 1. 先從 beaconRSSLog 過濾出 major = 2
         let major2Logs = beaconRSSLog
-            .filter { key, _ in
-                Int(key.split(separator: "-")[0]) == 2
-            }
+            .filter { key, _ in Int(key.split(separator: "-")[0]) == 2 }
 
         guard !major2Logs.isEmpty else {
             monitorResultTextView.text = "major=2 沒有任何資料"
             return
         }
 
-        // 2. 按 minor 升冪排序
-        let sortedByMinor = major2Logs.sorted { a, b in
-            let m1 = Int(a.key.split(separator: "-")[1])!
-            let m2 = Int(b.key.split(separator: "-")[1])!
-            return m1 < m2
-        }
-
-        // 3. Clamp RSSI 並計算每支 beacon 的平均值
-        //    clamp 規則：如果 rssi > -10 就設成 -90
-        let avgVector: [Double] = sortedByMinor.map { pair in
-            let recs = pair.value    // 這裡一定是 value 而不是 recs
-            let sanitized = recs.map { d in
-                Double(d.rssi > -10 ? -90 : d.rssi)
+        // 2. 產生固定長度 8 的 avgVector，minor 1…8，缺就填 -90
+        let avgVector: [Double] = (1...8).map { minor in
+            let key = "2-\(minor)"
+            if let recs = major2Logs[key], !recs.isEmpty {
+                // 再 clamp 一次保險
+                let sanitized = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
+                return sanitized.reduce(0, +) / Double(sanitized.count)
+            } else {
+                // 該 minor 這個時段沒收到，填 -90
+                return -90.0
             }
-            return sanitized.reduce(0, +) / Double(sanitized.count)
         }
 
-        // 4. 用這個 avgVector 做 KNN fingerprinting
-        let testVectors = [avgVector]
-        let results = knnMatch(testVectors: testVectors, k: 3)
-
+        // 3. 用這個 avgVector 做 KNN fingerprinting
+        let results = knnMatch(testVectors: [avgVector], k: 3)
         guard let first = results.first else {
             monitorResultTextView.text = "KNN 回傳空結果"
             return
         }
 
-        // 5. 顯示結果
+        // 4. 顯示結果
         var txt = "=== Major=2 Fingerprint KNN ===\n"
         txt += "TestGroup: \(first.testGroup)\n"
-        txt += String(
-            format: "Estimated Position: x=%.2f, y=%.2f\n",
-            first.x,
-            first.y
-        )
-        let matched = first.matchedGroups.joined(separator: ", ")
-        txt += "Matched DB Groups: \(matched)\n"
-
+        txt += String(format: "Estimated Position: x=%.2f, y=%.2f\n", first.x, first.y)
+        txt += "Matched DB Groups: " + first.matchedGroups.joined(separator: ", ")
         monitorResultTextView.text = txt
     }
-
-
-
 
     // MARK: - CSV I/O Helpers
     /// Saves the recorded beacon RSSI data to a CSV file,
