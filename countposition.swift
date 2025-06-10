@@ -35,6 +35,7 @@ struct PositionResult {
     let predictedX: Double?
     let predictedY: Double?
     let positionError: Double?
+    let region: String?  // 新增區域判斷
 }
 
 var beaconRSSLog: [String: [BeaconData]] = [:]
@@ -45,7 +46,14 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     var locationManager: CLLocationManager = CLLocationManager()
     let motionManager = CMMotionManager()
     var currentYaw: Double = 0.0
-    var isRecording: Bool = false
+    var isRecording: Bool = false {
+        didSet {
+            print("📝 Recording state changed: \(oldValue) -> \(isRecording)")
+            DispatchQueue.main.async {
+                self.updateUIForRecordingState()
+            }
+        }
+    }
     
     // MARK: - Outlets
     @IBOutlet weak var rangingResultTextView: UITextView!
@@ -76,22 +84,32 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
+        print("🚀 ViewController loaded")
         setupLocationManager()
         setupMotionManager()
         setupUI()
     }
     
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        print("👁️ View appeared - Current recording state: \(isRecording)")
+        updateUIForRecordingState()
+    }
+    
     // MARK: - Setup Methods
     func setupLocationManager() {
+        print("📍 Setting up location manager")
         locationManager.delegate = self
         
         if #available(iOS 14, *) {
             let currentStatus = locationManager.authorizationStatus
+            print("📱 Current authorization status (iOS 14+): \(currentStatus.rawValue)")
             if currentStatus != .authorizedAlways {
                 locationManager.requestAlwaysAuthorization()
             }
         } else {
             let currentStatus = CLLocationManager.authorizationStatus()
+            print("📱 Current authorization status: \(currentStatus.rawValue)")
             if currentStatus != .authorizedAlways {
                 locationManager.requestAlwaysAuthorization()
             }
@@ -99,12 +117,14 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         
         let constraint = CLBeaconIdentityConstraint(uuid: UUID(uuidString: uuid)!)
         locationManager.startRangingBeacons(satisfying: constraint)
+        print("📡 Started ranging beacons with UUID: \(uuid)")
     }
     
     func setupMotionManager() {
         if motionManager.isDeviceMotionAvailable {
             motionManager.deviceMotionUpdateInterval = 0.2
             motionManager.startDeviceMotionUpdates()
+            print("🧭 Motion manager started")
             
             Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
                 if let motion = self?.motionManager.deviceMotion {
@@ -112,6 +132,8 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
                     self?.currentYaw = yawDegrees
                 }
             }
+        } else {
+            print("❌ Device motion not available")
         }
     }
     
@@ -120,61 +142,178 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         monitorResultTextView.isEditable = false
         monitorResultTextView.isSelectable = true
         
-        startButton.setTitle("Start Recording", for: .normal)
-        exportButton.setTitle("Calculate Position", for: .normal)
-        exportButton.isEnabled = false
+        updateUIForRecordingState()
+        print("🎨 UI setup completed")
     }
     
-    // MARK: - CLLocationManagerDelegate
-    func locationManager(_ manager: CLLocationManager, didRangeBeacons beacons: [CLBeacon], in region: CLBeaconRegion) {
-        rangingResultTextView.text = ""
+    func updateUIForRecordingState() {
+        if isRecording {
+            startButton.setTitle("Stop Recording", for: .normal)
+            startButton.backgroundColor = UIColor.systemRed
+            exportButton.isEnabled = false
+            exportButton.alpha = 0.5
+        } else {
+            startButton.setTitle("Start Recording", for: .normal)
+            startButton.backgroundColor = UIColor.systemBlue
+            exportButton.isEnabled = !beaconRSSLog.isEmpty
+            exportButton.alpha = beaconRSSLog.isEmpty ? 0.5 : 1.0
+        }
         
-        if !isRecording { return }
+        print("🎯 UI updated - Recording: \(isRecording), Data available: \(!beaconRSSLog.isEmpty)")
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didRangeBeacons beacons: [CLBeacon], in region: CLBeaconRegion) {
+        let timestamp = Date()
+        let timestampString = DateFormatter.localizedString(from: timestamp, dateStyle: .none, timeStyle: .medium)
+        
+        // 更新畫面
+        DispatchQueue.main.async {
+            self.updateRangingDisplay(beacons: beacons, timestamp: timestampString)
+        }
+        
+        guard isRecording else { return }
         
         for beacon in beacons {
+            // 只處理 major == 1，遇到其他 major 就跳過
+            if beacon.major.intValue != 1 {
+                continue
+            }
+            
             let key = "\(beacon.major)-\(beacon.minor)"
             if beaconRSSLog[key] == nil {
                 beaconRSSLog[key] = []
             }
-            
-            let beaconData = BeaconData(rssi: beacon.rssi, timestamp: Date(), yaw: currentYaw)
+            let beaconData = BeaconData(rssi: beacon.rssi, timestamp: timestamp, yaw: currentYaw)
             beaconRSSLog[key]?.append(beaconData)
+        }
+        
+        DispatchQueue.main.async {
+            self.updateRecordingStatus()
+        }
+    }
+
+    
+    func updateRangingDisplay(beacons: [CLBeacon], timestamp: String) {
+        var displayText = "=== Beacon Ranging [\(timestamp)] ===\n\n"
+        
+        if beacons.isEmpty {
+            displayText += "No beacons detected\n"
+        } else {
+            for beacon in beacons.sorted(by: { $0.rssi > $1.rssi }) {
+                let yawString = String(format: "%.2f", currentYaw)
+                displayText += "🔵 Beacon \(beacon.major)-\(beacon.minor)\n"
+                displayText += "   RSSI: \(beacon.rssi) dBm\n"
+                displayText += "   Yaw: \(yawString)°\n"
+                displayText += "   Proximity: \(beacon.proximity.rawValue)\n\n"
+            }
+        }
+        
+        rangingResultTextView.text = displayText
+    }
+    
+    func updateRecordingStatus() {
+        if isRecording {
+            let totalDataPoints = beaconRSSLog.values.map { $0.count }.reduce(0, +)
+            let uniqueBeacons = beaconRSSLog.count
             
-            let yawString = String(format: "%.2f", currentYaw)
-            rangingResultTextView.text +=
-                "Major: \(beacon.major)  Minor: \(beacon.minor)\n" +
-                "RSSI: \(beacon.rssi)  Yaw: \(yawString)°\n\n"
+            var statusText = "🔴 RECORDING IN PROGRESS\n\n"
+            statusText += "Unique beacons detected: \(uniqueBeacons)\n"
+            statusText += "Total data points: \(totalDataPoints)\n\n"
+            
+            if !beaconRSSLog.isEmpty {
+                statusText += "Data per beacon:\n"
+                for (key, data) in beaconRSSLog.sorted(by: { $0.key < $1.key }) {
+                    let avgRSSI = data.isEmpty ? 0 : data.map { $0.rssi }.reduce(0, +) / data.count
+                    statusText += "  \(key): \(data.count) samples (avg RSSI: \(avgRSSI))\n"
+                }
+            }
+            
+            monitorResultTextView.text = statusText
+        } else if !beaconRSSLog.isEmpty {
+            let totalDataPoints = beaconRSSLog.values.map { $0.count }.reduce(0, +)
+            monitorResultTextView.text = "✅ Recording completed\n\nData collected from \(beaconRSSLog.count) beacons\nTotal samples: \(totalDataPoints)\n\nReady to calculate position!"
+        }
+        
+        updateUIForRecordingState()
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("❌ Location manager failed with error: \(error)")
+        DispatchQueue.main.async {
+            self.monitorResultTextView.text = "❌ Location error: \(error.localizedDescription)"
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        print("🔐 Authorization status changed to: \(status.rawValue)")
+        
+        DispatchQueue.main.async {
+            switch status {
+            case .notDetermined:
+                self.locationManager.requestAlwaysAuthorization()
+                self.monitorResultTextView.text = "⏳ Requesting location permission..."
+            case .denied, .restricted:
+                self.monitorResultTextView.text = "❌ Location access denied. Please enable in Settings → Privacy & Security → Location Services."
+            case .authorizedWhenInUse:
+                self.monitorResultTextView.text = "⚠️ Need 'Always' location permission for beacon ranging.\nPlease change to 'Always' in Settings."
+            case .authorizedAlways:
+                print("✅ Location authorized - starting beacon ranging")
+                let constraint = CLBeaconIdentityConstraint(uuid: UUID(uuidString: self.uuid)!)
+                self.locationManager.startRangingBeacons(satisfying: constraint)
+                self.monitorResultTextView.text = "✅ Location authorized. Searching for beacons..."
+            @unknown default:
+                self.monitorResultTextView.text = "⚠️ Unknown authorization status"
+            }
         }
     }
     
     // MARK: - Button Actions
     @IBAction func startButtonTapped(_ sender: UIButton) {
+        print("🔘 Start button tapped! Current recording state: \(isRecording)")
+        
         if isRecording {
             // Stop recording
+            print("⏹️ Stopping recording...")
             isRecording = false
-            startButton.setTitle("Start Recording", for: .normal)
-            exportButton.isEnabled = true
-            monitorResultTextView.text = "Recording stopped. Ready to calculate position."
+            print("📊 Final data summary:")
+            for (key, data) in beaconRSSLog {
+                print("  \(key): \(data.count) samples")
+            }
         } else {
             // Start recording
+            print("▶️ Starting recording...")
             beaconRSSLog.removeAll()
             isRecording = true
-            startButton.setTitle("Stop Recording", for: .normal)
-            exportButton.isEnabled = false
-            monitorResultTextView.text = "Recording started..."
+            
+            DispatchQueue.main.async {
+                self.monitorResultTextView.text = "🔴 Recording started...\nSearching for beacons...\n\nMake sure beacons are nearby and powered on."
+            }
         }
     }
     
     @IBAction func exportButtonTapped(_ sender: UIButton) {
+        print("📤 Export button tapped")
+        
+        if beaconRSSLog.isEmpty {
+            print("⚠️ No data to process")
+            monitorResultTextView.text = "⚠️ No data available. Please record some beacon data first."
+            return
+        }
+        
         calculatePosition()
     }
     
     // MARK: - Position Calculation
     func calculatePosition() {
+        print("🧮 Starting position calculation...")
         let averageRSSI = calculateAverageRSSI()
         
+        print("📊 Average RSSI values: \(averageRSSI)")
+        
         if averageRSSI.count < 3 {
-            monitorResultTextView.text = "需要至少3個beacon的數據來計算位置"
+            let message = "⚠️ Need at least 3 beacons for position calculation.\nCurrently have: \(averageRSSI.count) beacons"
+            print(message)
+            monitorResultTextView.text = message
             return
         }
         
@@ -185,17 +324,23 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         let beaconSequence = top3Beacons.map { Int($0.key.split(separator: "-")[1])! }
         let rssiValues = top3Beacons.map { $0.value }
         
+        print("🎯 Using top 3 beacons: \(beaconSequence) with RSSI: \(rssiValues)")
+        
         // Select appropriate path loss model
         let (db0Values, pathLossCoeffs) = selectPathLossModel(beaconSequence: beaconSequence, rssiValues: rssiValues)
         
         // Calculate distances
         let estimatedDistances = calculateDistances(db0Values: db0Values, rssiValues: rssiValues, pathLossCoeffs: pathLossCoeffs)
         
+        print("📏 Estimated distances: \(estimatedDistances)")
+        
         // Perform trilateration
         let (predX, predY) = performTrilateration(beaconSequence: beaconSequence, distances: estimatedDistances)
         
+        print("📍 Calculated position: (\(predX ?? -999), \(predY ?? -999))")
+        
         // Display results
-        displayResults(beaconSequence: beaconSequence, rssiValues: rssiValues, 
+        displayResults(beaconSequence: beaconSequence, rssiValues: rssiValues,
                       estimatedDistances: estimatedDistances, predX: predX, predY: predY)
     }
     
@@ -217,7 +362,7 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         var pathLossCoeffs: [Double] = []
         
         let beaconSet = Set(beaconSequence)
-        let beaconRSSI = Dictionary(zip(beaconSequence, rssiValues))
+        let beaconRSSI = Dictionary(uniqueKeysWithValues: zip(beaconSequence, rssiValues))
         
         if beaconSet == Set([2, 3, 4]) {
             if beaconRSSI[2]! > beaconRSSI[3]! {
@@ -363,38 +508,64 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         return (x, y)
     }
     
-    func displayResults(beaconSequence: [Int], rssiValues: [Double], 
+    // MARK: - Region Detection (新增的功能)
+    func determineRegionFromY(_ yCoordinate: Double) -> String {
+        if yCoordinate < 3.2 {
+            return "A"
+        } else if yCoordinate >= 3.2 && yCoordinate <= 7.2 {
+            return "B"
+        } else {
+            return "C"
+        }
+    }
+    
+    func displayResults(beaconSequence: [Int], rssiValues: [Double],
                        estimatedDistances: [Double], predX: Double?, predY: Double?) {
-        var resultText = "=== 位置計算結果 ===\n\n"
+        var resultText = "=== 🎯 Position Calculation Results ===\n\n"
         
-        resultText += "使用的Beacon序列: \(beaconSequence)\n"
-        resultText += "平均RSSI值: \(rssiValues.map { String(format: "%.2f", $0) })\n"
-        resultText += "估計距離: \(estimatedDistances.map { String(format: "%.3f", $0) })m\n\n"
+        resultText += "📡 Selected Beacons: \(beaconSequence)\n"
+        resultText += "📊 Average RSSI: \(rssiValues.map { String(format: "%.2f", $0) })\n"
+        resultText += "📏 Estimated Distances: \(estimatedDistances.map { String(format: "%.3f", $0) })m\n\n"
+        
+        var region: String? = nil
         
         if let x = predX, let y = predY {
-            resultText += "預測位置: (\(String(format: "%.3f", x)), \(String(format: "%.3f", y)))\n"
+            resultText += "📍 Predicted Position: (\(String(format: "%.3f", x)), \(String(format: "%.3f", y)))\n"
+            
+            // 根據 Y 軸座標判斷區域
+            region = determineRegionFromY(y)
+            resultText += "🏷️ Region: \(region!)\n"
+            
+            // 顯示區域判斷邏輯
+            resultText += "\n=== 🗺️ Region Classification ===\n"
+            resultText += "Y < 3.2: Region C\n"
+            resultText += "3.2 ≤ Y ≤ 7.2: Region B\n"
+            resultText += "Y > 7.2: Region A\n"
+            resultText += "Current Y = \(String(format: "%.3f", y)) → Region \(region!)\n"
+            
         } else {
-            resultText += "無法計算位置 - 三角定位失敗\n"
+            resultText += "❌ Unable to calculate position - trilateration failed\n"
         }
         
         // Show beacon positions for reference
-        resultText += "\n=== Beacon位置參考 ===\n"
+        resultText += "\n=== 🗺️ Beacon Reference Positions ===\n"
         for beacon in beaconSequence {
             if let pos = beaconPositions[beacon] {
-                resultText += "Beacon \(beacon): (\(pos.x), \(pos.y))\n"
+                resultText += "Beacon \(beacon): (\(pos.x), \(pos.y))m\n"
             }
         }
         
         monitorResultTextView.text = resultText
         
         // Save results to CSV if needed
-        _ = savePositionResultToCSV(beaconSequence: beaconSequence, rssiValues: rssiValues, 
-                                   estimatedDistances: estimatedDistances, predX: predX, predY: predY)
+        let fileURL = savePositionResultToCSV(beaconSequence: beaconSequence, rssiValues: rssiValues,
+                                             estimatedDistances: estimatedDistances, predX: predX, predY: predY, region: region)
+        print("💾 Results saved to: \(fileURL.lastPathComponent)")
     }
     
     // MARK: - File Operations
-    func savePositionResultToCSV(beaconSequence: [Int], rssiValues: [Double], 
-                                estimatedDistances: [Double], predX: Double?, predY: Double?) -> URL {
+    func savePositionResultToCSV(beaconSequence: [Int], rssiValues: [Double],
+                                estimatedDistances: [Double], predX: Double?, predY: Double?, region: String?) -> URL {
         let filenameFormatter = DateFormatter()
         filenameFormatter.dateFormat = "yyyyMMdd_HHmmss"
         let timestamp = filenameFormatter.string(from: Date())
@@ -405,21 +576,22 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         let documentDirectory = urls[0]
         let fileURL = documentDirectory.appendingPathComponent(filename)
         
-        var csvText = "Beacon_Sequence,RSSI_Values,Estimated_Distances,Predicted_X,Predicted_Y\n"
+        var csvText = "Beacon_Sequence,RSSI_Values,Estimated_Distances,Predicted_X,Predicted_Y,Region\n"
         
         let beaconSeqStr = beaconSequence.map(String.init).joined(separator: ";")
         let rssiStr = rssiValues.map { String(format: "%.2f", $0) }.joined(separator: ";")
         let distStr = estimatedDistances.map { String(format: "%.3f", $0) }.joined(separator: ";")
         let xStr = predX != nil ? String(format: "%.3f", predX!) : "N/A"
         let yStr = predY != nil ? String(format: "%.3f", predY!) : "N/A"
+        let regionStr = region ?? "N/A"
         
-        csvText += "\(beaconSeqStr),\(rssiStr),\(distStr),\(xStr),\(yStr)\n"
+        csvText += "\(beaconSeqStr),\(rssiStr),\(distStr),\(xStr),\(yStr),\(regionStr)\n"
         
         do {
             try csvText.write(to: fileURL, atomically: true, encoding: .utf8)
-            print("✅ 位置結果已儲存到: \(fileURL.lastPathComponent)")
+            print("✅ Position results saved to: \(fileURL.lastPathComponent)")
         } catch {
-            print("❌ 儲存錯誤: \(error)")
+            print("❌ Save error: \(error)")
         }
         
         return fileURL
