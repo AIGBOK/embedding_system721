@@ -255,48 +255,58 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
 
     // MARK: - Position Calculation (KNN Fingerprinting)
     func calculatePosition() {
-        // 1. 先從原始 beaconRSSLog 抓出所有 major=2 的 raw 資料
+        // 1. 先從 beaconRSSLog 過濾出 major = 2
         let major2Logs = beaconRSSLog
-            .filter { key, _ in Int(key.split(separator: "-")[0]) == 2 }
+            .filter { key, _ in
+                Int(key.split(separator: "-")[0]) == 2
+            }
 
-        guard major2Logs.count >= 1 else {
+        guard !major2Logs.isEmpty else {
             monitorResultTextView.text = "major=2 沒有任何資料"
             return
         }
 
-        // 2. 按 minor 升冪（1,2,3...8）排序
-        let sortedByMinor: [(key: String, recs: [BeaconData])] = major2Logs
-            .sorted { a, b in
-                let m1 = Int(a.key.split(separator: "-")[1])!
-                let m2 = Int(b.key.split(separator: "-")[1])!
-                return m1 < m2
-            }
-
-        // 3. 針對每個 beacon（同一 minor）的所有 RSSI 做 clamp & 計算平均
-        //    clamp 規則：如果 rssi > −10 → 當成 −90
-        let avgVector: [Double] = sortedByMinor.map { _, recs in
-            // 如果你只要最新 8 筆，可以改成 recs.suffix(8)
-            let allSanitized = recs.map { d in
-                Double(d.rssi > -10 ? -90 : d.rssi)
-            }
-            return allSanitized.reduce(0, +) / Double(allSanitized.count)
+        // 2. 按 minor 升冪排序
+        let sortedByMinor = major2Logs.sorted { a, b in
+            let m1 = Int(a.key.split(separator: "-")[1])!
+            let m2 = Int(b.key.split(separator: "-")[1])!
+            return m1 < m2
         }
 
-        // 4. 用這個 avgVector 當作唯一的 testVector 做 KNN
+        // 3. Clamp RSSI 並計算每支 beacon 的平均值
+        //    clamp 規則：如果 rssi > -10 就設成 -90
+        let avgVector: [Double] = sortedByMinor.map { pair in
+            let recs = pair.value    // 這裡一定是 value 而不是 recs
+            let sanitized = recs.map { d in
+                Double(d.rssi > -10 ? -90 : d.rssi)
+            }
+            return sanitized.reduce(0, +) / Double(sanitized.count)
+        }
+
+        // 4. 用這個 avgVector 做 KNN fingerprinting
         let testVectors = [avgVector]
         let results = knnMatch(testVectors: testVectors, k: 3)
+
         guard let first = results.first else {
             monitorResultTextView.text = "KNN 回傳空結果"
             return
         }
 
-        // 5. 顯示
+        // 5. 顯示結果
         var txt = "=== Major=2 Fingerprint KNN ===\n"
         txt += "TestGroup: \(first.testGroup)\n"
-        txt += "Estimated Position: x=\(String(format: \"%.2f\", first.x)), y=\(String(format: \"%.2f\", first.y))\n"
-        txt += "Matched DB Groups: \(first.matchedGroups)\n"
+        txt += String(
+            format: "Estimated Position: x=%.2f, y=%.2f\n",
+            first.x,
+            first.y
+        )
+        let matched = first.matchedGroups.joined(separator: ", ")
+        txt += "Matched DB Groups: \(matched)\n"
+
         monitorResultTextView.text = txt
     }
+
+
 
 
     // MARK: - CSV I/O Helpers
