@@ -258,45 +258,63 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     @IBAction func exportButtonTapped(_ sender: UIButton) {
         calculatePosition()
     }
-
+    
     // MARK: - Position Calculation (KNN Fingerprinting)
     func calculatePosition() {
-        // 1. 先從 beaconRSSLog 過濾出 major = 2
+    
+        // ────────────────────────────────
+        // ① 只抓 major = 2 的資料
+        //    major2Logs 仍是 [String: [BeaconData]]
+        //    key 形式 "2-<minor>"
+        // ────────────────────────────────
         let major2Logs = beaconRSSLog
             .filter { key, _ in Int(key.split(separator: "-")[0]) == 2 }
-
+    
         guard !major2Logs.isEmpty else {
-            monitorResultTextView.text = "major=2 沒有任何資料"
+            monitorResultTextView.text = "major = 2 沒有任何資料"
             return
         }
-
-        // 2. 產生固定長度 8 的 avgVector，minor 1…8，缺就填 -90
-        let avgVector: [Double] = (1...8).map { minor in
-            let key = "2-\(minor)"
-            if let recs = major2Logs[key], !recs.isEmpty {
-                // 再 clamp 一次保險
-                let sanitized = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
-                return sanitized.reduce(0, +) / Double(sanitized.count)
-            } else {
-                // 該 minor 這個時段沒收到，填 -90
-                return -90.0
+    
+        // ────────────────────────────────
+        // ② 依 minor 1…8 的順序排列
+        //    這裡先組成 (minor, recs) 陣列以保證順序
+        // ────────────────────────────────
+        let orderedMinorRecords: [(minor: Int, recs: [BeaconData])] =
+            (1...8).map { m in
+                let key = "2-\(m)"
+                return (minor: m, recs: major2Logs[key] ?? [])
             }
+    
+        // ────────────────────────────────
+        // ③ 對每支 beacon 做 clamp (> -10 ➜ -90)
+        //    然後求平均；若完全沒資料就補 -90
+        // ────────────────────────────────
+        let avgVector: [Double] = orderedMinorRecords.map { (_, recs) -> Double in
+            guard !recs.isEmpty else { return -90.0 }
+            let sanitized = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
+            return sanitized.reduce(0, +) / Double(sanitized.count)
         }
-
-        // 3. 用這個 avgVector 做 KNN fingerprinting
+    
+        // ────────────────────────────────
+        // ④ 丟到 KNN 指紋比對 (k = 3)
+        // ────────────────────────────────
         let results = knnMatch(testVectors: [avgVector], k: 3)
         guard let first = results.first else {
             monitorResultTextView.text = "KNN 回傳空結果"
             return
         }
-
-        // 4. 顯示結果
-        var txt = "=== Major=2 Fingerprint KNN ===\n"
-        txt += "TestGroup: \(first.testGroup)\n"
-        txt += String(format: "Estimated Position: x=%.2f, y=%.2f\n", first.x, first.y)
-        txt += "Matched DB Groups: " + first.matchedGroups.joined(separator: ", ")
+    
+        // ────────────────────────────────
+        // ⑤ 顯示結果
+        // ────────────────────────────────
+        var txt  = "=== Major = 2 Fingerprint KNN ===\n"
+        txt     += "TestGroup: \(first.testGroup)\n"
+        txt     += String(format: "Estimated Position: x = %.2f, y = %.2f\n",
+                          first.x, first.y)
+        txt     += "Matched DB Groups: " + first.matchedGroups.joined(separator: ", ")
         monitorResultTextView.text = txt
     }
+
 
     // MARK: - CSV I/O Helpers
     /// Saves the recorded beacon RSSI data to a CSV file,
