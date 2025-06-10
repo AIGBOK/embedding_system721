@@ -209,22 +209,30 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
                          didRangeBeacons beacons: [CLBeacon],
                          in region: CLBeaconRegion) {
         guard isRecording else { return }
-        rangingResultTextView.text = ""
         for beacon in beacons {
             let key = "\(beacon.major)-\(beacon.minor)"
             if beaconRSSLog[key] == nil {
                 beaconRSSLog[key] = []
             }
-            let data = BeaconData(rssi: beacon.rssi,
-                                  timestamp: Date(),
-                                  yaw: currentYaw)
-            beaconRSSLog[key]?.append(data)
+            // clamp：大於 -10 dBm 就當作 -90
+            let rawRSSI = beacon.rssi
+            let sanitizedRSSI = rawRSSI > -10 ? -90 : rawRSSI
+
+            let data = BeaconData(
+                rssi: sanitizedRSSI,
+                timestamp: Date(),
+                yaw: currentYaw
+            )
+            beaconRSSLog[key]!.append(data)
+
+            // UI 顯示也換成 sanitizedRSSI
             let yawStr = String(format: "%.2f", currentYaw)
             rangingResultTextView.text +=
                 "Major: \(beacon.major)  Minor: \(beacon.minor)\n" +
-                "RSSI: \(beacon.rssi)  Yaw: \(yawStr)°\n\n"
+                "RSSI: \(sanitizedRSSI)  Yaw: \(yawStr)°\n\n"
         }
     }
+
 
     // MARK: - Actions
     @IBAction func startButtonTapped(_ sender: UIButton) {
@@ -247,41 +255,49 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
 
     // MARK: - Position Calculation (KNN Fingerprinting)
     func calculatePosition() {
-        let allAvg = calculateAverageRSSI()
+        // 1. 先從原始 beaconRSSLog 抓出所有 major=2 的 raw 資料
+        let major2Logs = beaconRSSLog
+            .filter { key, _ in Int(key.split(separator: "-")[0]) == 2 }
 
-        // 只挑 major == 2 並檢查
-        let avgMajor2 = allAvg.filter { key, _ in
-            Int(key.split(separator: "-")[0]) == 2
-        }
-        guard !avgMajor2.isEmpty else {
-            monitorResultTextView.text = "在 major=2 的 beacon 裡，沒有資料可以做 KNN"
+        guard major2Logs.count >= 1 else {
+            monitorResultTextView.text = "major=2 沒有任何資料"
             return
         }
 
-        // 這裡依照 RSSI 強度取 top3，你若不需要可自行調整
-        let sortedByRSSI = avgMajor2.sorted { $0.value > $1.value }
-        let top3 = Array(sortedByRSSI.prefix(3))
+        // 2. 按 minor 升冪（1,2,3...8）排序
+        let sortedByMinor: [(key: String, recs: [BeaconData])] = major2Logs
+            .sorted { a, b in
+                let m1 = Int(a.key.split(separator: "-")[1])!
+                let m2 = Int(b.key.split(separator: "-")[1])!
+                return m1 < m2
+            }
 
-        // 透過 CSV 產生 testVectors
-        let csvURL = saveBeaconDataToCSV(onlyMajor: 2)
-        let (testVectors, _) = loadAndProcessCSV(at: csvURL)
-        guard !testVectors.isEmpty else {
-            monitorResultTextView.text = "生成 testVectors 失敗"
-            return
+        // 3. 針對每個 beacon（同一 minor）的所有 RSSI 做 clamp & 計算平均
+        //    clamp 規則：如果 rssi > −10 → 當成 −90
+        let avgVector: [Double] = sortedByMinor.map { _, recs in
+            // 如果你只要最新 8 筆，可以改成 recs.suffix(8)
+            let allSanitized = recs.map { d in
+                Double(d.rssi > -10 ? -90 : d.rssi)
+            }
+            return allSanitized.reduce(0, +) / Double(allSanitized.count)
         }
 
+        // 4. 用這個 avgVector 當作唯一的 testVector 做 KNN
+        let testVectors = [avgVector]
         let results = knnMatch(testVectors: testVectors, k: 3)
         guard let first = results.first else {
             monitorResultTextView.text = "KNN 回傳空結果"
             return
         }
 
+        // 5. 顯示
         var txt = "=== Major=2 Fingerprint KNN ===\n"
         txt += "TestGroup: \(first.testGroup)\n"
         txt += "Estimated Position: x=\(String(format: \"%.2f\", first.x)), y=\(String(format: \"%.2f\", first.y))\n"
         txt += "Matched DB Groups: \(first.matchedGroups)\n"
         monitorResultTextView.text = txt
     }
+
 
     // MARK: - CSV I/O Helpers
     /// Saves the recorded beacon RSSI data to a CSV file,
@@ -410,9 +426,12 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     func calculateAverageRSSI() -> [String: Double] {
         var avg: [String: Double] = [:]
         for (key, recs) in beaconRSSLog {
-            let sum = recs.map { Double($0.rssi) }.reduce(0, +)
-            avg[key] = sum / Double(recs.count)
+            // 先把每筆 rec.rssi 再 clamp 一次
+            let sanitized = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
+            let sum = sanitized.reduce(0, +)
+            avg[key] = sum / Double(sanitized.count)
         }
         return avg
     }
+
 }
