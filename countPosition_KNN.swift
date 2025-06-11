@@ -289,11 +289,25 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         // ③ 對每支 beacon 做 clamp (> -10 ➜ -90)
         //    然後求平均；若完全沒資料就補 -90
         // ────────────────────────────────
+        // ③ 先 Clamp，再 dBm→mW，再平均，再 mW→dBm
+        // ────────────────────────────────
         let avgVector: [Double] = orderedMinorRecords.map { (_, recs) -> Double in
+            // 若完全沒資料，直接用 -90 dBm
             guard !recs.isEmpty else { return -90.0 }
-            let sanitized = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
-            return sanitized.reduce(0, +) / Double(sanitized.count)
+        
+            // ① Clamp：把不合理的大於 -10 dBm 的數值壓成 -90 dBm
+            let clamped = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
+        
+            // ② dBm → 線性功率 (mW)：P(mW) = 10^(dBm/10)
+            let linearVals = clamped.map { pow(10.0, $0 / 10.0) }
+        
+            // ③ 線性域取平均
+            let linAvg = linearVals.reduce(0, +) / Double(linearVals.count)
+        
+            // ④ 線性 → dBm：dBm = 10·log10(P)
+            return 10.0 * log10(linAvg)
         }
+
     
         // ────────────────────────────────
         // ④ 丟到 KNN 指紋比對 (k = 3)
