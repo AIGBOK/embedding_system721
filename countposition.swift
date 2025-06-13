@@ -306,21 +306,54 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
     }
     
     // MARK: - Position Calculation
+    // 修正計算位置的主函數，增加更好的錯誤處理
     func calculatePosition() {
         print("🧮 Starting position calculation...")
         let averageRSSI = calculateAverageRSSI()
         
         print("📊 Average RSSI values: \(averageRSSI)")
         
-        if averageRSSI.count < 3 {
-            let message = "⚠️ Need at least 3 beacons for position calculation.\nCurrently have: \(averageRSSI.count) beacons"
+        if averageRSSI.isEmpty {
+            let message = "⚠️ No beacon data available for calculation."
+            print(message)
+            monitorResultTextView.text = message
+            return
+        }
+        
+        // 檢查 Beacon4 的 RSSI 是否小於 -55 dBm
+        var filteredRSSI = averageRSSI
+        if let beacon4Key = averageRSSI.keys.first(where: { $0.hasSuffix("-4") }),
+           let beacon4RSSI = averageRSSI[beacon4Key],
+           beacon4RSSI < -55 {
+            
+            print("⚠️ Beacon4 RSSI (\(beacon4RSSI)) < -55 dBm, removing from calculation")
+            filteredRSSI.removeValue(forKey: beacon4Key)
+            
+            // 檢查是否還有足夠的 beacon 1,2,3
+            let beacons123Keys = filteredRSSI.keys.filter { key in
+                let minor = Int(key.split(separator: "-")[1])!
+                return [1, 2, 3].contains(minor)
+            }
+            
+            if beacons123Keys.count < 3 {
+                let message = "⚠️ After excluding Beacon4 (RSSI < -55), only \(beacons123Keys.count) beacons [1,2,3] available.\nNeed at least 3 beacons for positioning."
+                print(message)
+                monitorResultTextView.text = message
+                return
+            }
+            
+            print("✅ Using beacons [1,2,3] after excluding Beacon4")
+        }
+        
+        if filteredRSSI.count < 3 {
+            let message = "⚠️ Need at least 3 beacons for position calculation.\nCurrently have: \(filteredRSSI.count) beacons"
             print(message)
             monitorResultTextView.text = message
             return
         }
         
         // Sort beacons by RSSI strength (strongest first) and take top 3
-        let sortedBeacons = averageRSSI.sorted { $0.value > $1.value }
+        let sortedBeacons = filteredRSSI.sorted { $0.value > $1.value }
         let top3Beacons = Array(sortedBeacons.prefix(3))
         
         let beaconSequence = top3Beacons.map { Int($0.key.split(separator: "-")[1])! }
@@ -359,112 +392,173 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         return averageRSSI
     }
     
-    func selectPathLossModel(beaconSequence: [Int], rssiValues: [Double]) -> ([Double], [Double]) {
+    func selectPathLossModel(
+        beaconSequence: [Int],
+        rssiValues: [Double]
+    ) -> ([Double], [Double]) {
+        // 1) 建立 BeaconID ↔ RSSI 的對應字典
+        let beaconRSSI = Dictionary(uniqueKeysWithValues: zip(beaconSequence, rssiValues))
+        
+        // 2) 檢查是否有 Beacon4 且其 RSSI < -55 dBm
+        if let beacon4Index = beaconSequence.firstIndex(of: 4),
+           rssiValues[beacon4Index] < -55 {
+            
+            print("⚠️ Beacon4 RSSI (\(rssiValues[beacon4Index])) < -55 dBm, excluding Beacon4")
+            
+            // 2.1 檢查是否有足夠的 beacon 1,2,3 資料
+            let availableBeacons = beaconSequence.filter { $0 != 4 }
+            let beacons123 = availableBeacons.filter { [1, 2, 3].contains($0) }
+            
+            if beacons123.count >= 3 {
+                // 有足夠的 beacon 1,2,3，使用它們
+                let seq123 = beacons123.sorted()  // 確保順序一致
+                let rssi123 = seq123.compactMap { beaconRSSI[$0] }
+                
+                print("✅ Using beacons \(seq123) instead of Beacon4")
+                
+                // 遞迴呼叫，用新的序列重新計算
+                return selectPathLossModel(
+                    beaconSequence: seq123,
+                    rssiValues: rssi123
+                )
+            } else {
+                // 沒有足夠的 beacon 1,2,3，保持原序列但給出警告
+                print("⚠️ Insufficient beacons [1,2,3] available, keeping original sequence")
+            }
+        }
+        
+        // 3) 正常的路徑選擇邏輯（原本的四種組合判斷）
+        return getPathLossValues(for: beaconSequence, rssiDict: beaconRSSI)
+    }
+
+    // 輔助函數：安全地獲取路徑損失值
+    private func getPathLossValues(for beaconSequence: [Int], rssiDict: [Int: Double]) -> ([Double], [Double]) {
+        let beaconSet = Set(beaconSequence)
         var db0Values: [Double] = []
         var pathLossCoeffs: [Double] = []
         
-        let beaconSet = Set(beaconSequence)
-        let beaconRSSI = Dictionary(uniqueKeysWithValues: zip(beaconSequence, rssiValues))
+        if beaconSet == Set([2,3,4]) {
+            // 二元假設：H1 if P2 > P3 → beacon4 用 path1，else 都 path2
+            guard let rssi2 = rssiDict[2], let rssi3 = rssiDict[3] else {
+                // 如果無法獲取必要的 RSSI 值，使用預設 path1
+                return getDefaultPathLossValues(for: beaconSequence, usePathOne: true)
+            }
+            
+            if rssi2 > rssi3 {
+                for b in beaconSequence {
+                    if b == 4 {
+                        db0Values.append(pathLossModel.db0Path1[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[b-1])
+                    } else {
+                        db0Values.append(pathLossModel.db0Path2[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[b-1])
+                    }
+                }
+            } else {
+                for b in beaconSequence {
+                    db0Values.append(pathLossModel.db0Path2[b-1])
+                    pathLossCoeffs.append(pathLossModel.pathLossCoeff2[b-1])
+                }
+            }
+        }
+        else if beaconSet == Set([1,3,4]) {
+            // H1 if P1 > P4 → beacon3 用 path1，其餘 path2；else 全 path2
+            guard let rssi1 = rssiDict[1], let rssi4 = rssiDict[4] else {
+                return getDefaultPathLossValues(for: beaconSequence, usePathOne: true)
+            }
+            
+            if rssi1 > rssi4 {
+                for b in beaconSequence {
+                    if b == 3 {
+                        db0Values.append(pathLossModel.db0Path1[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[b-1])
+                    } else {
+                        db0Values.append(pathLossModel.db0Path2[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[b-1])
+                    }
+                }
+            } else {
+                for b in beaconSequence {
+                    db0Values.append(pathLossModel.db0Path2[b-1])
+                    pathLossCoeffs.append(pathLossModel.pathLossCoeff2[b-1])
+                }
+            }
+        }
+        else if beaconSet == Set([1,2,4]) {
+            // H1 if P1 > P4 → 全 path1；else beacon2 path2，其餘 path1
+            guard let rssi1 = rssiDict[1], let rssi4 = rssiDict[4] else {
+                return getDefaultPathLossValues(for: beaconSequence, usePathOne: true)
+            }
+            
+            if rssi1 > rssi4 {
+                for b in beaconSequence {
+                    db0Values.append(pathLossModel.db0Path1[b-1])
+                    pathLossCoeffs.append(pathLossModel.pathLossCoeff1[b-1])
+                }
+            } else {
+                for b in beaconSequence {
+                    if b == 2 {
+                        db0Values.append(pathLossModel.db0Path2[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[b-1])
+                    } else {
+                        db0Values.append(pathLossModel.db0Path1[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[b-1])
+                    }
+                }
+            }
+        }
+        else if beaconSet == Set([1,2,3]) {
+            // H1 if P2 > P3 → 全 path1；else beacon1 path2，其餘 path1
+            guard let rssi2 = rssiDict[2], let rssi3 = rssiDict[3] else {
+                return getDefaultPathLossValues(for: beaconSequence, usePathOne: true)
+            }
+            
+            if rssi2 > rssi3 {
+                for b in beaconSequence {
+                    db0Values.append(pathLossModel.db0Path1[b-1])
+                    pathLossCoeffs.append(pathLossModel.pathLossCoeff1[b-1])
+                }
+            } else {
+                for b in beaconSequence {
+                    if b == 1 {
+                        db0Values.append(pathLossModel.db0Path2[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[b-1])
+                    } else {
+                        db0Values.append(pathLossModel.db0Path1[b-1])
+                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[b-1])
+                    }
+                }
+            }
+        }
+        else {
+            // 其餘預設全走 path1
+            return getDefaultPathLossValues(for: beaconSequence, usePathOne: true)
+        }
         
-        if beaconSet == Set([2, 3, 4]) {
-            if beaconRSSI[2]! > beaconRSSI[3]! {
-                for beacon in beaconSequence {
-                    if beacon == 4 {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    }
+        return (db0Values, pathLossCoeffs)
+    }
+
+    // 安全的預設值獲取函數
+    private func getDefaultPathLossValues(for beaconSequence: [Int], usePathOne: Bool) -> ([Double], [Double]) {
+        var db0Values: [Double] = []
+        var pathLossCoeffs: [Double] = []
+        
+        for b in beaconSequence {
+            // 確保索引在有效範圍內
+            let index = b - 1
+            if index >= 0 && index < pathLossModel.db0Path1.count {
+                if usePathOne {
+                    db0Values.append(pathLossModel.db0Path1[index])
+                    pathLossCoeffs.append(pathLossModel.pathLossCoeff1[index])
+                } else {
+                    db0Values.append(pathLossModel.db0Path2[index])
+                    pathLossCoeffs.append(pathLossModel.pathLossCoeff2[index])
                 }
-            } else {
-                for beacon in beaconSequence {
-                    if beacon == 4 {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    }
-                }
-            }
-        } else if beaconSet == Set([1, 3, 4]) {
-            if beaconRSSI[1]! > beaconRSSI[4]! {
-                for beacon in beaconSequence {
-                    if beacon == 3 {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    }
-                }
-            } else {
-                for beacon in beaconSequence {
-                    if beacon == 3 {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    }
-                }
-            }
-        } else if beaconSet == Set([1, 2, 4]) {
-            if beaconRSSI[1]! > beaconRSSI[4]! {
-                for beacon in beaconSequence {
-                    if beacon == 2 {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    }
-                }
-            } else {
-                for beacon in beaconSequence {
-                    if beacon == 2 {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    }
-                }
-            }
-        } else if beaconSet == Set([1, 2, 3]) {
-            if beaconRSSI[2]! > beaconRSSI[3]! {
-                for beacon in beaconSequence {
-                    if beacon == 1 {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    }
-                }
-            } else {
-                for beacon in beaconSequence {
-                    if beacon == 1 {
-                        db0Values.append(pathLossModel.db0Path2[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff2[beacon - 1])
-                    } else {
-                        db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                        pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
-                    }
-                }
-            }
-        } else {
-            // Default case - use path1 for all
-            for beacon in beaconSequence {
-                db0Values.append(pathLossModel.db0Path1[beacon - 1])
-                pathLossCoeffs.append(pathLossModel.pathLossCoeff1[beacon - 1])
             }
         }
         
         return (db0Values, pathLossCoeffs)
     }
-    
     func calculateDistances(db0Values: [Double], rssiValues: [Double], pathLossCoeffs: [Double]) -> [Double] {
         var distances: [Double] = []
         
@@ -525,6 +619,12 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
                        estimatedDistances: [Double], predX: Double?, predY: Double?) {
         var resultText = "=== 🎯 Position Calculation Results ===\n\n"
         
+        // 檢查是否排除了 Beacon4
+        let hasBeacon4 = beaconSequence.contains(4)
+        if !hasBeacon4 && beaconRSSLog.keys.contains(where: { $0.hasSuffix("-4") }) {
+            resultText += "⚠️ Beacon4 was excluded (RSSI < -55 dBm)\n\n"
+        }
+        
         resultText += "📡 Selected Beacons: \(beaconSequence)\n"
         resultText += "📊 Average RSSI: \(rssiValues.map { String(format: "%.2f", $0) })\n"
         resultText += "📏 Estimated Distances: \(estimatedDistances.map { String(format: "%.3f", $0) })m\n\n"
@@ -557,9 +657,22 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
             }
         }
         
+        // 顯示篩選資訊
+        resultText += "\n=== ℹ️ Beacon Selection Info ===\n"
+        let allBeacons = beaconRSSLog.keys.map { Int($0.split(separator: "-")[1])! }.sorted()
+        resultText += "Available beacons: \(allBeacons)\n"
+        resultText += "Used for calculation: \(beaconSequence)\n"
+        
+        if !hasBeacon4 && allBeacons.contains(4) {
+            if let beacon4Data = beaconRSSLog["1-4"] {
+                let avgRSSI = beacon4Data.map { $0.rssi }.reduce(0, +) / beacon4Data.count
+                resultText += "Beacon4 excluded: RSSI \(avgRSSI) < -55 dBm\n"
+            }
+        }
+        
         monitorResultTextView.text = resultText
         
-        // Save results to CSV if needed
+        // Save results to CSV
         let fileURL = savePositionResultToCSV(beaconSequence: beaconSequence, rssiValues: rssiValues,
                                              estimatedDistances: estimatedDistances, predX: predX, predY: predY, region: region)
         print("💾 Results saved to: \(fileURL.lastPathComponent)")
