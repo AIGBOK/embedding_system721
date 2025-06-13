@@ -289,44 +289,37 @@ class ViewController: UIViewController, CLLocationManagerDelegate {
         // ③ 對每支 beacon 做 clamp (> -10 ➜ -90)
         //    然後求平均；若完全沒資料就補 -90
         // ────────────────────────────────
+        // ────────────────────────────────
         // ③ 先 Clamp，再 dBm→mW，再平均，再 mW→dBm
-        // ────────────────────────────────
-        let avgVector: [Double] = orderedMinorRecords.map { (_, recs) -> Double in
-            // 若完全沒資料，直接用 -90 dBm
-            guard !recs.isEmpty else { return -90.0 }
-        
-            // ① Clamp：把不合理的大於 -10 dBm 的數值壓成 -90 dBm
-            let clamped = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
-        
-            // ② dBm → 線性功率 (mW)：P(mW) = 10^(dBm/10)
-            let linearVals = clamped.map { pow(10.0, $0 / 10.0) }
-        
-            // ③ 線性域取平均
-            let linAvg = linearVals.reduce(0, +) / Double(linearVals.count)
-        
-            // ④ 線性 → dBm：dBm = 10·log10(P)
-            return 10.0 * log10(linAvg)
-        }
+            let avgVector: [Double] = orderedMinorRecords.map { (_, recs) -> Double in
+                guard !recs.isEmpty else { return -90.0 }
+                let clamped = recs.map { Double($0.rssi > -10 ? -90 : $0.rssi) }
+                let linearVals = clamped.map { pow(10.0, $0 / 10.0) }
+                let linAvg = linearVals.reduce(0, +) / Double(linearVals.count)
+                return 10.0 * log10(linAvg)
+            }
 
-    
-        // ────────────────────────────────
-        // ④ 丟到 KNN 指紋比對 (k = 3)
-        // ────────────────────────────────
-        let results = knnMatch(testVectors: [avgVector], k: 3)
-        guard let first = results.first else {
-            monitorResultTextView.text = "KNN 回傳空結果"
-            return
-        }
-    
-        // ────────────────────────────────
-        // ⑤ 顯示結果
-        // ────────────────────────────────
-        var txt  = "=== Major = 2 Fingerprint KNN ===\n"
-        txt     += "TestGroup: \(first.testGroup)\n"
-        txt     += String(format: "Estimated Position: x = %.2f, y = %.2f\n",
-                          first.x, first.y)
-        txt     += "Matched DB Groups: " + first.matchedGroups.joined(separator: ", ")
-        monitorResultTextView.text = txt
+            // ④ KNN 比对
+            let results = knnMatch(testVectors: [avgVector], k: 3)
+            guard let first = results.first else {
+                monitorResultTextView.text = "KNN 回傳空結果"
+                return
+            }
+
+            // ⑤ 显示结果
+            var txt  = "=== Major = 2 Fingerprint KNN ===\n"
+            txt     += "TestGroup: \(first.testGroup)\n"
+            txt     += String(format: "Estimated Position: x = %.2f, y = %.2f\n",
+                              first.x, first.y)
+            txt     += "Matched DB Groups: " + first.matchedGroups.joined(separator: ", ") + "\n\n"
+
+            // —— 新增：逐一输出 Minor 1~8 的平均 RSSI ——
+            txt += "Minor 1～8 平均 RSSI：\n"
+            for (i, avgRssi) in avgVector.enumerated() {
+                txt += String(format: "  Minor %d: %.2f dBm\n", i + 1, avgRssi)
+            }
+
+            monitorResultTextView.text = txt
     }
 
 
